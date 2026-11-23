@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MathExam CBT - Dashboard Guru</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Parser Excel (.xlsx/.csv) & Word (.docx) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+  <style>
+    .tab-btn.active {
+      border-bottom: 2px solid #4f46e5;
+      color: #4338ca;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-lg shadow-sm">
+          &Sigma;
+        </div>
+        <div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <h1 class="font-bold text-slate-900 text-lg leading-tight">MathExam CBT</h1>
+            <span class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+              Dashboard Guru
+            </span>
+          </div>
+          <p id="realtimeStatusText" class="text-xs text-slate-500">
+            Live Realtime Aktif &bull; Nilai, Bank Soal &amp; Pengaturan Sinkron
+          </p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2.5">
+        <a href="index.html" target="_blank" class="px-3.5 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition">
+          Portal Siswa &#8599;
+        </a>
+        <button id="btnLockPanel" type="button" onclick="toggleLockPanel()" class="px-3.5 py-2 text-sm font-medium rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 transition">
+          Kunci Panel
+        </button>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 flex gap-6 border-t border-slate-100 overflow-x-auto">
+      <button id="tab-questions" type="button" onclick="switchTab('questions')" class="tab-btn active py-3 text-sm text-slate-600 hover:text-slate-900 whitespace-nowrap">
+        Bank Soal &amp; Kunci Jawaban
+      </button>
+      <button id="tab-settings" type="button" onclick="switchTab('settings')" class="tab-btn py-3 text-sm text-slate-600 hover:text-slate-900 whitespace-nowrap">
+        Pengaturan Ujian
+      </button>
+      <button id="tab-scores" type="button" onclick="switchTab('scores')" class="tab-btn py-3 text-sm text-slate-600 hover:text-slate-900 whitespace-nowrap">
+        Rekap Nilai Siswa
+      </button>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+    <!-- Alert / Toast Banner -->
+    <div id="alertBox" class="hidden items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm">
+      <span id="alertMessage"></span>
+      <button type="button" onclick="hideAlert()" class="font-bold opacity-70 hover:opacity-100">&times;</button>
+    </div>
+
+    <!-- Summary Cards -->
+    <section class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
+        <p class="text-xs font-medium text-slate-500">Total Rekap Masuk</p>
+        <p id="statTotalScores" class="text-3xl font-bold text-slate-900 mt-1">0</p>
+      </div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
+        <p class="text-xs font-medium text-slate-500">Rata-Rata Nilai</p>
+        <p id="statAvgScore" class="text-3xl font-bold text-indigo-600 mt-1">0</p>
+      </div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
+        <p class="text-xs font-medium text-slate-500">Jumlah Soal Aktif (Sinkron Siswa)</p>
+        <p id="statTotalQuestions" class="text-3xl font-bold text-emerald-600 mt-1">0</p>
+      </div>
+    </section>
+
+    <!-- TAB 1: BANK SOAL & KUNCI JAWABAN -->
+    <section id="panel-questions" class="space-y-6">
+
+      <!-- Action Bar: Upload Soal, Upload Kunci Jawaban, Hapus Semua Soal -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        <!-- 1. Upload Soal -->
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 flex flex-col justify-between gap-4">
+          <div>
+            <div class="flex items-center justify-between">
+              <h2 class="font-semibold text-slate-900 text-base">1. Upload Soal</h2>
+              <span class="text-xs px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-medium">TXT / CSV / XLSX / DOCX</span>
+            </div>
+            <p class="text-xs text-slate-500 mt-1.5 leading-relaxed">
+              Impor kumpulan soal baru ke bank soal dan sinkronkan ke Supabase. Format teks: pisahkan tiap soal dengan baris kosong (`1. Pertanyaan...`, `A. ...`, `B. ...`, `C. ...`, `D. ...`, opsional `Kunci: A` &amp; `Pembahasan: ...`).
+            </p>
+          </div>
+          <div class="space-y-2.5">
+            <input id="fileQuestionInput" type="file" accept=".txt,.csv,.xlsx,.xls,.docx" class="block w-full text-xs text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer" />
+            <div class="flex gap-2">
+              <button type="button" onclick="handleImportQuestionsFile()" class="flex-1 py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition">
+                Import File Soal
+              </button>
+              <button type="button" onclick="toggleQuickTextModal('question')" class="py-2 px-3 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-medium transition">
+                Tempel Teks
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Upload Kunci Jawaban Terintegrasi -->
+        <div class="bg-white rounded-2xl border border-emerald-200 p-5 flex flex-col justify-between gap-4">
+          <div>
+            <div class="flex items-center justify-between">
+              <h2 class="font-semibold text-slate-900 text-base">2. Upload Kunci Jawaban</h2>
+              <span class="text-xs px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium">Otomatis Cocokkan No.</span>
+            </div>
+            <p class="text-xs text-slate-500 mt-1.5 leading-relaxed">
+              Unggah file kunci jawaban terpisah (misal <code class="bg-slate-100 px-1 rounded">1. A</code>, <code class="bg-slate-100 px-1 rounded">2 = C</code>, tabel Excel/CSV, atau Word). Sistem otomatis mencocokkan nomor urut soal yang ada di bank soal.
+            </p>
+          </div>
+          <div class="space-y-2.5">
+            <input id="fileAnswerKeyInput" type="file" accept=".txt,.csv,.xlsx,.xls,.docx" class="block w-full text-xs text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 cursor-pointer" />
+            <div class="flex gap-2">
+              <button type="button" onclick="handleImportAnswerKeyFile()" class="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition">
+                Terapkan Kunci Jawaban
+              </button>
+              <button type="button" onclick="toggleQuickTextModal('answerKey')" class="py-2 px-3 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-medium transition">
+                Tempel Teks
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Hapus Semua Bank Soal -->
+        <div class="bg-white rounded-2xl border border-rose-200 p-5 flex flex-col justify-between gap-4">
+          <div>
+            <div class="flex items-center justify-between">
+              <h2 class="font-semibold text-slate-900 text-base">3. Hapus Semua Bank Soal</h2>
+              <span class="text-xs px-2 py-0.5 rounded bg-rose-50 text-rose-700 font-medium">Aksi Permanen</span>
+            </div>
+            <p class="text-xs text-slate-500 mt-1.5 leading-relaxed">
+              Mengosongkan seluruh daftar soal di dashboard guru sekaligus menghapus baris di tabel <code class="bg-slate-100 px-1 rounded">exam_questions</code> Supabase agar portal siswa tidak menampilkan soal lama.
+            </p>
+          </div>
+          <div>
+            <button id="btnDeleteAllQuestions" type="button" onclick="deleteAllQuestions()" class="w-full py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold transition">
+              Hapus Semua Bank Soal
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Paste Box (muncul saat klik Tempel Teks) -->
+      <div id="quickTextBox" class="hidden bg-white rounded-2xl border border-indigo-200 p-5 space-y-3">
+        <div class="flex items-center justify-between">
+          <h3 id="quickTextTitle" class="font-semibold text-sm text-slate-900">Tempel Teks</h3>
+          <button type="button" onclick="toggleQuickTextModal(null)" class="text-xs text-slate-500 hover:text-slate-800">Tutup</button>
+        </div>
+        <textarea id="quickTextArea" rows="6" placeholder="Contoh kunci jawaban:&#10;1. A&#10;2. C - Pembahasan singkat nomor 2&#10;3. B" class="w-full rounded-xl border border-slate-300 p-3 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
+        <div class="flex justify-end gap-2">
+          <button type="button" onclick="toggleQuickTextModal(null)" class="px-3.5 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-700">Batal</button>
+          <button id="btnApplyQuickText" type="button" onclick="applyQuickText()" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold">Proses Teks</button>
+        </div>
+      </div>
+
+      <!-- Form Tambah Soal Manual -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
+        <h3 class="font-semibold text-slate-900 text-sm">Tambah Soal Manual</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <textarea id="manualQuestionText" rows="2" placeholder="Tulis pertanyaan soal..." class="md:col-span-2 rounded-xl border border-slate-300 p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
+          <input id="optA" type="text" placeholder="Pilihan A" class="rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+          <input id="optB" type="text" placeholder="Pilihan B" class="rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+          <input id="optC" type="text" placeholder="Pilihan C" class="rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+          <input id="optD" type="text" placeholder="Pilihan D" class="rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+          <div class="flex items-center gap-3">
+            <label class="text-xs font-medium text-slate-600">Kunci Jawaban:</label>
+            <select id="manualCorrectAnswer" class="rounded-xl border border-slate-300 px-3 py-2 text-sm bg-white">
+              <option value="A">A</option>
+              <option value="B">B</option>
+              <option value="C">C</option>
+              <option value="D">D</option>
+            </select>
+          </div>
+          <input id="manualExplanation" type="text" placeholder="Pembahasan (opsional)" class="rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+        </div>
+        <div class="flex justify-end">
+          <button type="button" onclick="addManualQuestion()" class="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition">
+            + Simpan Soal ke Bank Soal
+          </button>
+        </div>
+      </div>
+
+      <!-- Daftar Bank Soal & Status Kunci Jawaban -->
+      <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 class="font-semibold text-slate-900">Daftar Bank Soal Aktif</h3>
+            <p class="text-xs text-slate-500">Setiap perubahan kunci jawaban atau hapus soal otomatis tersinkron ke Supabase.</p>
+          </div>
+          <span id="questionCountBadge" class="text-xs font-semibold px-3 py-1 rounded-full bg-slate-100 text-slate-700">0 Soal</span>
+        </div>
+
+        <div id="questionsListContainer" class="divide-y divide-slate-100">
+          <div class="p-8 text-center text-sm text-slate-400">Memuat daftar soal...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: PENGATURAN UJIAN -->
+    <section id="panel-settings" class="hidden bg-white rounded-2xl border border-slate-200 p-6 space-y-4 max-w-2xl">
+      <h2 class="font-semibold text-slate-900 text-base">Pengaturan Ujian</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div class="sm:col-span-2">
+          <label class="block text-xs font-medium text-slate-600 mb-1">Judul Ujian</label>
+          <input id="settingTitle" type="text" value="Penilaian Harian Matematika" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Token Ujian</label>
+          <input id="settingToken" type="text" value="MATH2026" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm uppercase" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Durasi (Menit)</label>
+          <input id="settingDuration" type="number" min="1" value="60" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Batas Pelanggaran</label>
+          <input id="settingMaxViolations" type="number" min="0" value="3" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+        </div>
+        <div class="flex items-center gap-2 pt-5">
+          <input id="settingShowExplanation" type="checkbox" class="rounded border-slate-300 text-indigo-600" />
+          <label for="settingShowExplanation" class="text-xs font-medium text-slate-700">Tampilkan pembahasan ke siswa setelah selesai</label>
+        </div>
+      </div>
+      <div class="pt-2">
+        <button type="button" onclick="saveExamSettings()" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition">
+          Simpan &amp; Sinkronkan ke Siswa
+        </button>
+      </div>
+    </section>
+
+    <!-- TAB 3: REKAP NILAI SISWA -->
+    <section id="panel-scores" class="hidden bg-white rounded-2xl border border-slate-200 overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+        <h2 class="font-semibold text-slate-900 text-base">Rekap Nilai Siswa</h2>
+        <button type="button" onclick="loadScores()" class="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium hover:bg-slate-50">
+          Refresh Rekap
+        </button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-slate-50 text-xs uppercase text-slate-500 border-b border-slate-200">
+            <tr>
+              <th class="py-3 px-4">No</th>
+              <th class="py-3 px-4">Nama Siswa</th>
+              <th class="py-3 px-4">Kelas</th>
+              <th class="py-3 px-4">Nilai</th>
+              <th class="py-3 px-4">Waktu Submit</th>
+            </tr>
+          </thead>
+          <tbody id="scoresTableBody" class="divide-y divide-slate-100">
+            <tr><td colspan="5" class="py-6 text-center text-slate-400 text-xs">Belum ada data nilai.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    // =========================================================================
+    // 1. KONFIGURASI SUPABASE (Ganti sesuai URL & Anon Key proyek Anda)
+    // =========================================================================
+    const SUPABASE_URL = 'https://YOUR_PROJECT_REF.supabase.co';
+    const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+
+    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    let questionsCache = [];
+    let quickTextMode = null; // 'question' | 'answerKey'
+    let isPanelLocked = false;
+
+    // =========================================================================
+    // 2. UTILITAS UI & NOTIFIKASI
+    // =========================================================================
+    function showAlert(message, type = 'info') {
+      const box = document.getElementById('alertBox');
+      const msg = document.getElementById('alertMessage');
+      box.className = 'flex items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm';
+
+      if (type === 'success') {
+        box.classList.add('bg-emerald-50', 'border-emerald-200', 'text-emerald-800');
+      } else if (type === 'error') {
+        box.classList.add('bg-rose-50', 'border-rose-200', 'text-rose-800');
+      } else {
+        box.classList.add('bg-amber-50', 'border-amber-200', 'text-amber-900');
+      }
+
+      msg.textContent = message;
+      box.classList.remove('hidden');
+    }
+
+    function hideAlert() {
+      document.getElementById('alertBox').classList.add('hidden');
+    }
+
+    function escapeHtml(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function switchTab(tabName) {
+      ['questions', 'settings', 'scores'].forEach((t) => {
+        document.getElementById(`tab-${t}`).classList.toggle('active', t === tabName);
+        document.getElementById(`panel-${t}`).classList.toggle('hidden', t !== tabName);
+      });
+    }
+
+    function toggleLockPanel() {
+      isPanelLocked = !isPanelLocked;
+      const btn = document.getElementById('btnLockPanel');
+      btn.textContent = isPanelLocked ? 'Buka Kunci Panel' : 'Kunci Panel';
+      document.querySelectorAll('main button, main input, main textarea, main select').forEach((el) => {
+        if (el.id !== 'btnLockPanel') {
+          el.disabled = isPanelLocked;
+        }
+      });
+      showAlert(isPanelLocked ? 'Panel guru dikunci sementara.' : 'Panel guru dibuka kembali.', 'info');
+    }
+
+    function updateStats() {
+      document.getElementById('statTotalQuestions').textContent = questionsCache.length;
+      document.getElementById('questionCountBadge').textContent = `${questionsCache.length} Soal`;
+    }
+
+    // =========================================================================
+    // 3. LOAD & RENDER BANK SOAL
+    // =========================================================================
+    async function loadQuestions() {
+      const { data, error } = await supabaseClient
+        .from('exam_questions')
+        .select('*')
+        .order('id', { ascending: true });
+
+      if (error) {
+        showAlert(`Gagal memuat bank soal: ${error.message}`, 'error');
+        return;
+      }
+
+      questionsCache = data || [];
+      renderQuestionsList();
+      updateStats();
+    }
+
+    function renderQuestionsList() {
+      const container = document.getElementById('questionsListContainer');
+      if (!questionsCache.length) {
+        container.innerHTML = `
+          <div class="p-8 text-center text-sm text-slate-400">
+            Bank soal masih kosong. Silakan import file soal, tambah soal manual, atau unggah kunci jawaban setelah soal tersedia.
+          </div>`;
+        return;
+      }
+
+      container.innerHTML = questionsCache.map((q, idx) => {
+        const number = idx + 1;
+        const options = Array.isArray(q.options) ? q.options : [q.option_a, q.option_b, q.option_c, q.option_d].filter(Boolean);
+        const ans = (q.correct_answer || q.answer || '').toString().toUpperCase().trim();
+        const hasKey = ['A', 'B', 'C', 'D'].includes(ans);
+
+        return `
+          <div class="p-4 sm:p-5 hover:bg-slate-50/70 transition space-y-2.5">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div class="flex items-start gap-2.5 flex-1 min-w-[240px]">
+                <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-slate-100 text-slate-800 text-xs font-bold shrink-0 mt-0.5">
+                  ${number}
+                </span>
+                <div>
+                  <p class="text-sm font-medium text-slate-900">${escapeHtml(q.question_text || q.question || '')}</p>
+                  ${options.length ? `
+                    <ul class="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-1 text-xs text-slate-600">
+                      ${options.map((opt, oIdx) => {
+                        const letter = ['A', 'B', 'C', 'D'][oIdx] || '';
+                        const cleanOpt = String(opt).replace(/^[A-Da-d][\.\)\:\-]\s*/, '');
+                        return `<li class="${ans === letter ? 'font-semibold text-emerald-700' : ''}"><span class="font-semibold">${letter}.</span> ${escapeHtml(cleanOpt)}</li>`;
+                      }).join('')}
+                    </ul>
+                  ` : ''}
+                  ${q.explanation ? `<p class="mt-1.5 text-xs text-indigo-700 bg-indigo-50/70 px-2.5 py-1 rounded-lg">Pembahasan: ${escapeHtml(q.explanation)}</p>` : ''}
+                </div>
+              </div>
+
+              <div class="flex items-center gap-2 shrink-0">
+                <label class="text-xs text-slate-500">Kunci:</label>
+                <select onchange="updateSingleAnswerKey('${q.id}', this.value)" class="rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${hasKey ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-amber-50 border-amber-300 text-amber-800'}">
+                  <option value="" ${!hasKey ? 'selected' : ''}>Belum Ada</option>
+                  <option value="A" ${ans === 'A' ? 'selected' : ''}>A</option>
+                  <option value="B" ${ans === 'B' ? 'selected' : ''}>B</option>
+                  <option value="C" ${ans === 'C' ? 'selected' : ''}>C</option>
+                  <option value="D" ${ans === 'D' ? 'selected' : ''}>D</option>
+                </select>
+                <button type="button" onclick="deleteSingleQuestion('${q.id}')" class="px-2.5 py-1.5 rounded-lg text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200">
+                  Hapus
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // =========================================================================
+    // 4. TAMBAH & UPLOAD SOAL
+    // =========================================================================
+    async function addManualQuestion() {
+      const questionText = document.getElementById('manualQuestionText').value.trim();
+      const opts = [
+        document.getElementById('optA').value.trim(),
+        document.getElementById('optB').value.trim(),
+        document.getElementById('optC').value.trim(),
+        document.getElementById('optD').value.trim(),
+      ];
+      const correctAnswer = document.getElementById('manualCorrectAnswer').value;
+      const explanation = document.getElementById('manualExplanation').value.trim();
+
+      if (!questionText) {
+        showAlert('Teks pertanyaan soal tidak boleh kosong.', 'error');
+        return;
+      }
+
+      const payload = {
+        question_text: questionText,
+        options: opts,
+        correct_answer: correctAnswer,
+        explanation: explanation || null,
+      };
+
+      const { error } = await supabaseClient.from('exam_questions').insert([payload]);
+      if (error) {
+        showAlert(`Gagal menyimpan soal: ${error.message}`, 'error');
+        return;
+      }
+
+      document.getElementById('manualQuestionText').value = '';
+      ['optA', 'optB', 'optC', 'optD', 'manualExplanation'].forEach((id) => {
+        document.getElementById(id).value = '';
+      });
+
+      showAlert('Soal baru berhasil ditambahkan dan disinkronkan ke Supabase.', 'success');
+      await loadQuestions();
+    }
+
+    function parseQuestionsFromText(rawText) {
+      const blocks = rawText
+        .replace(/\r\n/g, '\n')
+        .split(/\n\s*\n+/)
+        .map((b) => b.trim())
+        .filter(Boolean);
+
+      const parsed = [];
+      for (const block of blocks) {
+        const lines = block.split('\n').map((l) => l.trim()).filter(Boolean);
+        if (!lines.length) continue;
+
+        let questionText = lines[0].replace(/^\d+[\.\)\-]\s*/, '').trim();
+        const options = [];
+        let correctAnswer = '';
+        let explanation = '';
+
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i];
+          const optMatch = line.match(/^([A-Da-d])[\.\)\:\-]\s*(.+)$/);
+          const keyMatch = line.match(/^(?:kunci(?:\s*jawaban)?|jawaban|ans)\s*[:=\-]\s*([A-Da-d])/i);
+          const expMatch = line.match(/^(?:pembahasan|penjelasan|bahas)\s*[:=\-]\s*(.+)$/i);
+
+          if (keyMatch) {
+            correctAnswer = keyMatch[1].toUpperCase();
+          } else if (expMatch) {
+            explanation = expMatch[1].trim();
+          } else if (optMatch) {
+            options.push(optMatch[2].trim());
+          } else if (!options.length) {
+            questionText += ' ' + line;
+          }
+        }
+
+        if (questionText) {
+          parsed.push({
+            question_text: questionText,
+            options,
+            correct_answer: correctAnswer || null,
+            explanation: explanation || null,
+          });
+        }
+      }
+      return parsed;
+    }
+
+    async function extractFileText(file) {
+      const ext = file.name.split('.').pop().toLowerCase();
+
+      if (ext === 'docx') {
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        return result.value || '';
+      }
+
+      if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') {
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+        return rows
+          .filter((r) => Array.isArray(r) && r.some((cell) => String(cell || '').trim() !== ''))
+          .map((r) => r.map((c) => String(c ?? '').trim()).filter(Boolean).join(' | '))
+          .join('\n');
+      }
+
+      return await file.text();
+    }
+
+    async function handleImportQuestionsFile() {
+      const input = document.getElementById('fileQuestionInput');
+      const file = input.files && input.files[0];
+      if (!file) {
+        showAlert('Pilih file soal terlebih dahulu (TXT, CSV, XLSX, atau DOCX).', 'error');
+        return;
+      }
+
+      try {
+        const ext = file.name.split('.').pop().toLowerCase();
+        let itemsToInsert = [];
+
+        if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') {
+          const arrayBuffer = await file.arrayBuffer();
+          const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+          const sheet = workbook.Sheets[workbook.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+          itemsToInsert = rows
+            .map((r) => {
+              const qText = String(r.soal || r.question || r.pertanyaan || r.Soal || '').trim();
+              const opts = [r.a || r.A || r.opsi_a || '', r.b || r.B || r.opsi_b || '', r.c || r.C || r.opsi_c || '', r.d || r.D || r.opsi_d || '']
+                .map((v) => String(v).trim())
+                .filter(Boolean);
+              const key = String(r.kunci || r.kunci_jawaban || r.jawaban || r.answer || '').trim().toUpperCase();
+              const exp = String(r.pembahasan || r.explanation || '').trim();
+              if (!qText) return null;
+              return {
+                question_text: qText,
+                options: opts,
+                correct_answer: ['A', 'B', 'C', 'D'].includes(key) ? key : null,
+                explanation: exp || null,
+              };
+            })
+            .filter(Boolean);
+        } else {
+          const text = await extractFileText(file);
+          itemsToInsert = parseQuestionsFromText(text);
+        }
+
+        if (!itemsToInsert.length) {
+          showAlert('Tidak ada soal valid yang berhasil terbaca dari file.', 'error');
+          return;
+        }
+
+        const { error } = await supabaseClient.from('exam_questions').insert(itemsToInsert);
+        if (error) {
+          showAlert(`Gagal mengimpor soal ke Supabase: ${error.message}`, 'error');
+          return;
+        }
+
+        input.value = '';
+        showAlert(`Berhasil mengimpor ${itemsToInsert.length} soal ke bank soal!`, 'success');
+        await loadQuestions();
+      } catch (err) {
+        showAlert(`Terjadi kesalahan saat membaca file soal: ${err.message}`, 'error');
+      }
+    }
+
+    // =========================================================================
+    // 5. UPLOAD KUNCI JAWABAN TERINTEGRASI (COCOKKAN NOMOR SOAL)
+    // =========================================================================
+    function parseAnswerKeyMap(rawText) {
+      // Mengembalikan Map<number, { answer: string, explanation?: string }>
+      const keyMap = new Map();
+      const lines = rawText.replace(/\r\n/g, '\n').split('\n');
+
+      // Pola 1: baris per nomor, misal "1. A", "1) B - pembahasan", "1 = C", "Soal 1: D"
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        const match = trimmed.match(/^(?:no\.?|nomor|soal)?\s*(\d+)\s*[\.\)\:=\-]\s*([A-Da-d])\b(?:\s*(?:[-–—|]|\b(?:pembahasan|penjelasan|bahas)\b[:\-]?)\s*(.+))?$/i);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          const ans = match[2].toUpperCase();
+          const exp = match[3] ? match[3].trim() : undefined;
+          keyMap.set(num, { answer: ans, explanation: exp });
+        }
+      }
+
+      // Pola 2: format inline berurutan seperti "1.A 2.B 3.C 4.D" bila belum banyak terdeteksi
+      if (keyMap.size === 0) {
+        const inlineMatches = [...rawText.matchAll(/\b(\d+)\s*[\.\)\:\-]\s*([A-Da-d])\b/g)];
+        for (const m of inlineMatches) {
+          keyMap.set(parseInt(m[1], 10), { answer: m[2].toUpperCase() });
+        }
+      }
+
+      return keyMap;
+    }
+
+    async function applyAnswerKeyMapToQuestions(keyMap) {
+      if (!questionsCache.length) {
+        showAlert('Bank soal masih kosong. Upload soal terlebih dahulu sebelum mengunggah kunci jawaban.', 'error');
+        return;
+      }
+
+      if (!keyMap || keyMap.size === 0) {
+        showAlert('Format kunci jawaban tidak dikenali. Gunakan format seperti "1. A", "2. C", atau kolom nomor & kunci.', 'error');
+        return;
+      }
+
+      let matchedCount = 0;
+      const updatePromises = [];
+
+      questionsCache.forEach((q, idx) => {
+        const questionNumber = idx + 1;
+        if (keyMap.has(questionNumber)) {
+          const entry = keyMap.get(questionNumber);
+          matchedCount++;
+          const updateData = { correct_answer: entry.answer };
+          if (entry.explanation) {
+            updateData.explanation = entry.explanation;
+          }
+          updatePromises.push(
+            supabaseClient.from('exam_questions').update(updateData).eq('id', q.id)
+          );
+        }
+      });
+
+      if (matchedCount === 0) {
+        showAlert('Tidak ada nomor kunci jawaban yang cocok dengan nomor urut soal di bank soal.', 'error');
+        return;
+      }
+
+      const results = await Promise.all(updatePromises);
+      const failed = results.find((r) => r.error);
+      if (failed) {
+        showAlert(`Sebagian kunci jawaban gagal disimpan: ${failed.error.message}`, 'error');
+        return;
+      }
+
+      showAlert(`Berhasil menerapkan ${matchedCount} kunci jawaban ke bank soal & menyinkronkan ke Supabase!`, 'success');
+      await loadQuestions();
+    }
+
+    async function handleImportAnswerKeyFile() {
+      const input = document.getElementById('fileAnswerKeyInput');
+      const file = input.files && input.files[0];
+      if (!file) {
+        showAlert('Pilih file kunci jawaban terlebih dahulu (TXT, CSV, XLSX, atau DOCX).', 'error');
+        return;
+      }
+
+      try {
+        const ext = file.name.split('.').pop().toLowerCase();
+        const keyMap = new Map();
+
+        if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') {
+          const arrayBuffer = await file.arrayBuffer();
+          const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+          const sheet = workbook.Sheets[workbook.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+          rows.forEach((row) => {
+            if (!Array.isArray(row) || row.length < 2) return;
+            const numMatch = String(row[0] ?? '').match(/(\d+)/);
+            const ansMatch = String(row[1] ?? '').trim().match(/^([A-Da-d])$/i);
+            const expText = row[2] ? String(row[2]).trim() : undefined;
+
+            if (numMatch && ansMatch) {
+              keyMap.set(parseInt(numMatch[1], 10), {
+                answer: ansMatch[1].toUpperCase(),
+                explanation: expText || undefined,
+              });
+            }
+          });
+        } else {
+          const text = await extractFileText(file);
+          const parsedMap = parseAnswerKeyMap(text);
+          parsedMap.forEach((v, k) => keyMap.set(k, v));
+        }
+
+        await applyAnswerKeyMapToQuestions(keyMap);
+        input.value = '';
+      } catch (err) {
+        showAlert(`Gagal memproses file kunci jawaban: ${err.message}`, 'error');
+      }
+    }
+
+    async function updateSingleAnswerKey(questionId, newAnswer) {
+      const val = newAnswer ? newAnswer.toUpperCase() : null;
+      const { error } = await supabaseClient
+        .from('exam_questions')
+        .update({ correct_answer: val })
+        .eq('id', questionId);
+
+      if (error) {
+        showAlert(`Gagal memperbarui kunci jawaban: ${error.message}`, 'error');
+        return;
+      }
+
+      showAlert('Kunci jawaban soal diperbarui.', 'success');
+      await loadQuestions();
+    }
+
+    // =========================================================================
+    // 6. HAPUS SOAL & HAPUS SEMUA BANK SOAL
+    // =========================================================================
+    async function deleteSingleQuestion(questionId) {
+      if (!confirm('Hapus soal ini dari bank soal?')) return;
+
+      const { error } = await supabaseClient
+        .from('exam_questions')
+        .delete()
+        .eq('id', questionId);
+
+      if (error) {
+        showAlert(`Gagal menghapus soal: ${error.message}`, 'error');
+        return;
+      }
+
+      showAlert('Soal berhasil dihapus.', 'success');
+      await loadQuestions();
+    }
+
+    async function deleteAllQuestions() {
+      if (!questionsCache.length) {
+        showAlert('Bank soal memang sudah kosong.', 'info');
+        return;
+      }
+
+      const confirmed = confirm(
+        `Yakin ingin MENGHAPUS SEMUA (${questionsCache.length}) soal di bank soal?\nTindakan ini akan mengosongkan tabel exam_questions di Supabase dan langsung berdampak ke portal siswa.`
+      );
+      if (!confirmed) return;
+
+      const btn = document.getElementById('btnDeleteAllQuestions');
+      btn.disabled = true;
+      btn.textContent = 'Menghapus...';
+
+      // Hapus seluruh baris pada tabel exam_questions
+      const { error } = await supabaseClient
+        .from('exam_questions')
+        .delete()
+        .not('id', 'is', null);
+
+      btn.disabled = false;
+      btn.textContent = 'Hapus Semua Bank Soal';
+
+      if (error) {
+        showAlert(`Gagal menghapus semua bank soal: ${error.message}`, 'error');
+        return;
+      }
+
+      questionsCache = [];
+      renderQuestionsList();
+      updateStats();
+      showAlert('Semua soal di bank soal telah berhasil dihapus dan disinkronkan.', 'success');
+    }
+
+    // =========================================================================
+    // 7. TEMPEL TEKS CEPAT (SOAL / KUNCI JAWABAN)
+    // =========================================================================
+    function toggleQuickTextModal(mode) {
+      const box = document.getElementById('quickTextBox');
+      const title = document.getElementById('quickTextTitle');
+      const area = document.getElementById('quickTextArea');
+
+      if (!mode) {
+        quickTextMode = null;
+        box.classList.add('hidden');
+        return;
+      }
+
+      quickTextMode = mode;
+      box.classList.remove('hidden');
+
+      if (mode === 'answerKey') {
+        title.textContent = 'Tempel Teks Kunci Jawaban';
+        area.placeholder = 'Contoh:\n1. A\n2. C - Pembahasan nomor 2\n3. B';
+      } else {
+        title.textContent = 'Tempel Teks Soal';
+        area.placeholder = 'Contoh:\n1. Hasil dari 2 + 3 adalah...\nA. 4\nB. 5\nC. 6\nD. 7\nKunci: B';
+      }
+      area.value = '';
+      area.focus();
+    }
+
+    async function applyQuickText() {
+      const text = document.getElementById('quickTextArea').value.trim();
+      if (!text) {
+        showAlert('Silakan tempelkan teks terlebih dahulu.', 'error');
+        return;
+      }
+
+      if (quickTextMode === 'answerKey') {
+        const map = parseAnswerKeyMap(text);
+        await applyAnswerKeyMapToQuestions(map);
+        toggleQuickTextModal(null);
+      } else if (quickTextMode === 'question') {
+        const items = parseQuestionsFromText(text);
+        if (!items.length) {
+          showAlert('Tidak ada soal valid yang berhasil dikenali dari teks.', 'error');
+          return;
+        }
+        const { error } = await supabaseClient.from('exam_questions').insert(items);
+        if (error) {
+          showAlert(`Gagal menyimpan soal: ${error.message}`, 'error');
+          return;
+        }
+        showAlert(`Berhasil menambahkan ${items.length} soal dari teks.`, 'success');
+        toggleQuickTextModal(null);
+        await loadQuestions();
+      }
+    }
+
+    // =========================================================================
+    // 8. PENGATURAN UJIAN & REKAP NILAI
+    // =========================================================================
+    async function saveExamSettings() {
+      const payload = {
+        id: 1,
+        exam_title: document.getElementById('settingTitle').value.trim(),
+        exam_token: document.getElementById('settingToken').value.trim().toUpperCase(),
+        duration_minutes: parseInt(document.getElementById('settingDuration').value, 10) || 60,
+        max_violations: parseInt(document.getElementById('settingMaxViolations').value, 10) || 0,
+        show_explanation: document.getElementById('settingShowExplanation').checked,
+      };
+
+      const { error } = await supabaseClient
+        .from('exam_settings')
+        .upsert(payload, { onConflict: 'id' });
+
+      if (error) {
+        showAlert(`Gagal menyimpan pengaturan: ${error.message}`, 'error');
+        return;
+      }
+
+      showAlert('Pengaturan ujian berhasil disimpan dan disinkronkan ke portal siswa!', 'success');
+    }
+
+    async function loadExamSettings() {
+      const { data, error } = await supabaseClient
+        .from('exam_settings')
+        .select('*')
+        .eq('id', 1)
+        .maybeSingle();
+
+      if (error || !data) return;
+      if (data.exam_title) document.getElementById('settingTitle').value = data.exam_title;
+      if (data.exam_token) document.getElementById('settingToken').value = data.exam_token;
+      if (data.duration_minutes) document.getElementById('settingDuration').value = data.duration_minutes;
+      if (data.max_violations !== undefined && data.max_violations !== null) {
+        document.getElementById('settingMaxViolations').value = data.max_violations;
+      }
+      document.getElementById('settingShowExplanation').checked = Boolean(data.show_explanation);
+    }
+
+    async function loadScores() {
+      const { data, error } = await supabaseClient
+        .from('scores')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) return;
+
+      const rows = data || [];
+      document.getElementById('statTotalScores').textContent = rows.length;
+
+      const numericScores = rows.map((r) => Number(r.score)).filter((n) => !Number.isNaN(n));
+      const avg = numericScores.length
+        ? (numericScores.reduce((a, b) => a + b, 0) / numericScores.length).toFixed(1)
+        : 0;
+      document.getElementById('statAvgScore').textContent = avg;
+
+      const tbody = document.getElementById('scoresTableBody');
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-slate-400 text-xs">Belum ada data nilai.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.map((r, i) => `
+        <tr>
+          <td class="py-3 px-4 text-xs text-slate-500">${i + 1}</td>
+          <td class="py-3 px-4 font-medium text-slate-900">${escapeHtml(r.student_name || r.name || '-')}</td>
+          <td class="py-3 px-4 text-slate-600">${escapeHtml(r.class_name || r.kelas || '-')}</td>
+          <td class="py-3 px-4 font-semibold text-indigo-600">${escapeHtml(r.score ?? 0)}</td>
+          <td class="py-3 px-4 text-xs text-slate-500">${r.created_at ? new Date(r.created_at).toLocaleString('id-ID') : '-'}</td>
+        </tr>
+      `).join('');
+    }
+
+    // =========================================================================
+    // 9. REALTIME SUBSCRIPTION
+    // =========================================================================
+    function subscribeRealtime() {
+      supabaseClient
+        .channel('guru-realtime-sync')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'exam_questions' }, () => {
+          loadQuestions();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'scores' }, () => {
+          loadScores();
+        })
+        .subscribe();
+    }
+
+    // Init
+    (async function init() {
+      await Promise.all([loadQuestions(), loadExamSettings(), loadScores()]);
+      subscribeRealtime();
+    })();
+  </script>
+</body>
+</html>
